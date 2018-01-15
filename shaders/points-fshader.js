@@ -111,6 +111,7 @@ void main() {
     // I test that it works properly.
     vec2 imageCoord = coord - 0.5;
     vec3 sourcePosition = deproject(sourceDepthTexture, imageCoord);
+            outCrossProduct = vec4(1.0, 1.0, 1.0, 0.0);
     if (sourcePosition.z != 0.0) {
         vec3 sourceNormal = estimateNormal(sourceDepthTexture, imageCoord);
         if (sourceNormal != vec3(0.0, 0.0, 0.0)) {
@@ -120,6 +121,8 @@ void main() {
 
             vec2 destImageCoord = project(sourcePosition);
             vec3 destPosition = deproject(destDepthTexture, destImageCoord);
+            outCrossProduct = vec4(1000.0*abs(sourcePosition - destPosition), 1.0);
+            // outCrossProduct = vec4(100.0*distance(sourcePosition, destPosition), 0.0, 0.0, 1.0);
             if (destPosition.z != 0.0) {
                 vec3 destNormal = estimateNormal(destDepthTexture, destImageCoord);
                 if (destNormal != vec3(0.0, 0.0, 0.0)) {
@@ -127,7 +130,7 @@ void main() {
                     if (distance(sourcePosition, destPosition) < MAX_DISTANCE
                             && dot(sourceNormal, destNormal) > MIN_NORMAL_DOT) {
 
-                        outCrossProduct = vec4(cross(sourcePosition, sourceNormal), 0.0);
+                        // outCrossProduct = vec4(cross(sourcePosition, sourceNormal), 0.0);
                         outNormal = vec4(sourceNormal, 0.0);
                         float dotProduct = dot(sourcePosition - destPosition, sourceNormal);
                         float error = pow(dotProduct, 2.0);

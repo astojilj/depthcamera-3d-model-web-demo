@@ -22,7 +22,7 @@ let lastMousePositionY = 0;
 let yaw = 0;
 let pitch = 0;
 
-const USE_FAKE_DATA = false;
+const USE_FAKE_DATA = true;
 
 // Use this for displaying errors to the user. More details should be put into
 // `console.error` messages.
@@ -177,8 +177,9 @@ async function doMain() {
                 frame,
             );
             mat4.mul(globalMovement, movement, globalMovement);
-            // console.log(movement);
+            console.log(movement);
             console.log("");
+            if (frame === 1) return;
 
             program = programs.model;
             gl.useProgram(program);
