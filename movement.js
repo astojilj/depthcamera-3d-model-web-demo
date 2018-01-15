@@ -45,6 +45,14 @@ function constructEquation(data) {
     console.log('error: ', error);
     // console.log('A: ', A);
     // console.log('b: ', b);
+    const AA = numeric.transpose(A);
+    for (let i = 0; i < A.length; i += 1) {
+        for (let j = 0; j < A[i].length; j += 1) {
+            if (A[i][j] !== AA[i][j]) {
+                console.error("A not symmetric, diff is ", A[i][j] - AA[i][j]);
+            }
+        }
+    }
     return [A, b, error];
 }
 
