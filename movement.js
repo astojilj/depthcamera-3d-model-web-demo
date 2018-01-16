@@ -196,6 +196,22 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
         if (Number.isNaN(x[0])) {
             throw Error('No corresponding points between frames found.');
         }
+        // Verify that Ax = b, at least approximately.
+        // This seems to freeze the browser, so let's multiply manually
+        // const Ax = numeric.mul(A, x);
+        const Ax = new Float32Array(6);
+        for (i = 0; i < b.length; i += 1) {
+            Ax[i] = 0.0;
+            for (j = 0; j < b.length; j += 1) {
+                Ax[i] += A[i][j]*x[j];
+            }
+        }
+        for (i = 0; i < Ax.length; i += 1) {
+            if (Math.abs(b[i] - Ax[i]) > 0.00001) {
+                const diff = b[i] - Ax[i];
+                console.error("b and Ax are not the same, diff ", diff);
+            }
+        }
         mat4.mul(movement, constructMovement(x), movement);
         previousError = error;
     }
