@@ -133,8 +133,6 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
     const stride = 4;
 
     const movement = mat4.create();
-
-    // mat4.translate(movement, movement, vec3.fromValues(-0.01, 0, 0));
     let previousError = 0;
     // Run the ICP algorithm until the
     // error stops changing (which usually means it converged).
@@ -145,13 +143,8 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
         gl.useProgram(program);
         l = gl.getUniformLocation(program, 'movement');
         gl.uniformMatrix4fv(l, false, movement);
-        // gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.points);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.points);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        // const data2 = new Float32Array(stride);
-        // gl.readPixels(55, 55, 1, 1, gl.RGBA, gl.FLOAT, data2);
-        // console.log("data from points shader: ", data2);
-        return movement;
 
         // Use the textures created by the points shader to construct a 6x6
         // matrix A and 6x1 vector b for each point and store it into a texture.
@@ -187,9 +180,9 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
         // (and this is not a bad thing), because a better movement estimate may
         // match more points to each other. A very small error could simply mean
         // that there isn't much overlap between the point clouds.
-        // if (Math.abs(error - previousError) < ERROR_DIFF_THRESHOLD) {
-        //     break;
-        // }
+        if (Math.abs(error - previousError) < ERROR_DIFF_THRESHOLD) {
+            break;
+        }
         // Solve Ax = b. The x vector will contain the 3 rotation angles (around
         // the x axis, y axis and z axis) and the translation (tx, ty, tz).
         const x = numeric.solve(A, b);
