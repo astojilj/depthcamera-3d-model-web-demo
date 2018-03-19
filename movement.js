@@ -25,6 +25,7 @@ const ERROR_DIFF_THRESHOLD = 0.0001;
 function constructEquation(data) {
     const stride = 4;
     const error = data[14*stride];
+    const pointsUsed = data[14*stride + 1]
     const A = Array(6);
     const b = new Float32Array(6);
     for (let i = 0; i < 6; i += 1) {
@@ -45,6 +46,7 @@ function constructEquation(data) {
     console.log('error: ', error);
     // console.log('A: ', A);
     // console.log('b: ', b);
+    console.log("points used: ", pointsUsed);
     const AA = numeric.transpose(A);
     for (let i = 0; i < A.length; i += 1) {
         for (let j = 0; j < A[i].length; j += 1) {
@@ -53,7 +55,7 @@ function constructEquation(data) {
             }
         }
     }
-    return [A, b, error];
+    return [A, b, error, pointsUsed];
 }
 
 // The parameter 'x' should contain a vector with 6 items, which holds the
@@ -173,7 +175,7 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
         // containing the matrix A, the vector b and the error
         const data = new Float32Array(5 * 3 * stride);
         gl.readPixels(0, 0, 5, 3, gl.RGBA, gl.FLOAT, data);
-        const [A, b, error] = constructEquation(data);
+        const [A, b, error, pointsUsed] = constructEquation(data);
 
         // The algorithm has converged, because the error didn't change much
         // from the last loop. Note that the error might actually get higher
