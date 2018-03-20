@@ -46,8 +46,8 @@ function constructEquation(data) {
     // console.log('error: ', error);
     // console.log('A: ', A);
     // console.log('b: ', b);
-    // console.log("points used: ", pointsUsed);
-    console.log("relative error: ", error/pointsUsed);
+    console.log("points used: ", pointsUsed);
+    console.log("relative error: ", (error/pointsUsed).toExponential());
     const AA = numeric.transpose(A);
     for (let i = 0; i < A.length; i += 1) {
         for (let j = 0; j < A[i].length; j += 1) {
@@ -126,12 +126,12 @@ function estimateMovement(gl, programs, textures, framebuffers, frame) {
     if (frame === 0) return mat4.create();
     program = programs.points;
     gl.useProgram(program);
-    // Swap between depth textures, so that the older one is referenced as
-    // destDepthTexture.
-    l = gl.getUniformLocation(program, 'sourceDepthTexture');
-    gl.uniform1i(l, textures.depth[frame%2].glId());
-    l = gl.getUniformLocation(program, 'destDepthTexture');
-    gl.uniform1i(l, textures.depth[(frame+1)%2].glId());
+    l = gl.getUniformLocation(program, 'cubeTexture');
+    if (frame % 2 === 0) {
+        gl.uniform1i(l, textures.cube1.glId());
+    } else {
+        gl.uniform1i(l, textures.cube0.glId());
+    }
     // Number of items in each texel, 4 means RGBA, 3 means RGB.
     const stride = 4;
 
