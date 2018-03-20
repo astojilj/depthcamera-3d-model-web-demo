@@ -43,10 +43,11 @@ function constructEquation(data) {
         b[i] = -data[(12*stride) + i];
         b[i + 3] = -data[(13*stride) + i];
     }
-    console.log('error: ', error);
+    // console.log('error: ', error);
     // console.log('A: ', A);
     // console.log('b: ', b);
-    console.log("points used: ", pointsUsed);
+    // console.log("points used: ", pointsUsed);
+    console.log("relative error: ", error/pointsUsed);
     const AA = numeric.transpose(A);
     for (let i = 0; i < A.length; i += 1) {
         for (let j = 0; j < A[i].length; j += 1) {
