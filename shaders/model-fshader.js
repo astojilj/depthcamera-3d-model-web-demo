@@ -98,12 +98,14 @@ precision highp float;
 
 layout(location = 0) out vec2 outTexel;
 
-// Length of each side of the cubeTexture.
-uniform int cubeSize;
+// Inverted value of the cubeTexture side length.
+uniform float gridUnit;
 // Representation of the volumetric model.
 uniform highp sampler3D cubeTexture;
 // Depth image from the camera.
 uniform highp sampler2D depthTexture;
+// RGB image from the camera.
+uniform highp sampler2D colorTexture;
 // Which slice of the cubeTexture in the z direction we are rendering. Goes
 // from 0 to (cubeSize-1).
 uniform uint zslice;
@@ -112,8 +114,34 @@ uniform uint zslice;
 uniform float sdfTruncation;
 // Estimated movement of the (real-world) camera.
 uniform mat4 movement;
+// Matrix that represents the transformation to be done between the depth data
+// 3D position to the color data 3D position.
+uniform mat4 depthToColor;
+// Offset of the principal point of the color camera.
+uniform vec2 colorOffset;
+// Focal length of the color camera.
+uniform vec2 colorFocalLength;
 
 ${PROJECT_DEPROJECT_SHADER_FUNCTIONS}
+
+
+// Get the color for the |depth| 3D position; project onto the color video frame
+// and sample from the texture. It is packed in order to be represented by two
+// floats.
+vec2 getPackedColor(sampler2D tex, vec2 coord) {
+    vec2 texCoord = coord + 0.5;
+    float depth = float(texture(tex, texCoord).r) * depthScale;
+    vec2 size = vec2(640.0, 480.0);
+    vec2 position2d = (coord - depthOffset) / depthFocalLength;
+    vec3 depthpos = vec3(position2d * depth, depth);
+
+    vec4 position = depthToColor * vec4(depthpos, 1.0);
+    position2d = position.xy / position.z;
+    vec2 colorTextureCoord = position2d * colorFocalLength + colorOffset;
+    vec4 color = texture(colorTexture, colorTextureCoord);
+    color = mix(color, vec4(0.0), float(coordIsOutOfRange(colorTextureCoord)));
+    return min(color.rg, vec2(0.99, 0.99)) + floor(255.0 * color.ba);
+}
 
 // Return the new sdf value to be stored in the sub-cube.
 // The 'position' argument is the center of the sub-cube for which we are
@@ -124,7 +152,7 @@ ${PROJECT_DEPROJECT_SHADER_FUNCTIONS}
 vec2 calculateSdf(vec3 texelCoordinate, vec3 position) {
     // Current value in the texture, to be updated.
     vec2 old = texture(cubeTexture, texelCoordinate).rg;
-    // Make sure no division by 0 in prjecting occurs.
+    // Make sure no division by 0 in projecting occurs.
     // TODO: can this be done without a condition?
     if (position.z == 0.0) return old;
     vec2 p = project(position);
@@ -142,10 +170,9 @@ vec2 calculateSdf(vec3 texelCoordinate, vec3 position) {
 
 // Calculate the texel coordinate for a texel with index (i, j, k).
 vec3 texelCenter(uint i, uint j, uint k) {
-    float size = float(cubeSize);
-    return vec3((float(i) + 0.5) / size,
-                (float(j) + 0.5) / size,
-                (float(k) + 0.5) / size);
+    return vec3((float(i) + 0.5) * gridUnit,
+                (float(j) + 0.5) * gridUnit,
+                (float(k) + 0.5) * gridUnit);
 }
 
 void main() {

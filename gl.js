@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const CUBE_SIZE = 128;
+const CUBE_SIZE = (typeof CUBE_SIZE_CONFIG == 'undefined')
+                  ? 128 : CUBE_SIZE_CONFIG;
 const GRID_UNIT = 1.0 / CUBE_SIZE;
 // a variant of SDF called TSDF limits the signed distance between
 // -SDF_TRUNCATION and SDF_TRUNCATION
@@ -74,8 +75,12 @@ function setupPrograms(gl) {
     const points = createShader(gl, gl.FRAGMENT_SHADER, pointsShader);
     const matrices = createShader(gl, gl.FRAGMENT_SHADER, matricesShader);
     const sum = createShader(gl, gl.FRAGMENT_SHADER, sumShader);
-    const model = createShader(gl, gl.FRAGMENT_SHADER, modelShader);
-    const render = createShader(gl, gl.FRAGMENT_SHADER, renderShader);
+    // TODO: don't create shaders and programs we don't use in AR_MARKERS mode:
+    // points, matrices, sum.
+    const model = createShader(gl, gl.FRAGMENT_SHADER, USE_AR_MARKERS ?
+                               modelShaderARMarkers : modelShader);
+    const render = createShader(gl, gl.FRAGMENT_SHADER, USE_AR_MARKERS ?
+                                renderShaderARMarkers : renderShader);
     return {
         points: linkProgram(gl, canvas, points),
         matrices: linkProgram(gl, canvas, matrices),
@@ -135,6 +140,11 @@ function initUniforms(gl, programs, textures, parameters, width, height) {
     const offsety = (intrin.offset[1] / height) - 0.5;
     const focalx = intrin.focalLength[0] / width;
     const focaly = intrin.focalLength[1] / height;
+    const coloroffsetx = parameters.colorOffset[0] / width;
+    const coloroffsety = parameters.colorOffset[1] / height;
+    const colorfocalx = parameters.colorFocalLength[0] / width;
+    const colorfocaly = parameters.colorFocalLength[1] / height;
+
 
     let l = 0;
     let program;
@@ -168,8 +178,12 @@ function initUniforms(gl, programs, textures, parameters, width, height) {
     gl.uniform1i(l, textures.cube0.glId());
     l = gl.getUniformLocation(program, 'depthTexture');
     gl.uniform1i(l, textures.depth[0].glId());
+    l = gl.getUniformLocation(program, 'colorTexture');
+    gl.uniform1i(l, textures.color.glId());
     l = gl.getUniformLocation(program, 'cubeSize');
     gl.uniform1i(l, CUBE_SIZE);
+    l = gl.getUniformLocation(program, 'gridUnit');
+    gl.uniform1f(l, GRID_UNIT);
     l = gl.getUniformLocation(program, 'sdfTruncation');
     gl.uniform1f(l, SDF_TRUNCATION);
     l = gl.getUniformLocation(program, 'movement');
@@ -180,12 +194,17 @@ function initUniforms(gl, programs, textures, parameters, width, height) {
     gl.uniform2f(l, focalx, focaly);
     l = gl.getUniformLocation(program, 'depthOffset');
     gl.uniform2f(l, offsetx, offsety);
-
+    l = gl.getUniformLocation(program, 'colorTexture');
+    gl.uniform1i(l, textures.color[0].glId());
+    l = gl.getUniformLocation(program, 'colorFocalLength');
+    gl.uniform2f(l, colorfocalx, colorfocaly);
+    l = gl.getUniformLocation(program, 'colorOffset');
+    gl.uniform2f(l, coloroffsetx, coloroffsety);
+    l = gl.getUniformLocation(program, "depthToColor");
+    gl.uniformMatrix4fv(l, false, parameters.depthToColor);
 
     program = programs.render;
     gl.useProgram(program);
-    l = gl.getUniformLocation(program, 'cubeTexture');
-    gl.uniform1i(l, textures.cube1.glId());
     l = gl.getUniformLocation(program, 'canvasSize');
     gl.uniform2ui(l, gl.canvas.width, gl.canvas.height);
     l = gl.getUniformLocation(program, 'viewMatrix');
@@ -196,6 +215,8 @@ function initUniforms(gl, programs, textures, parameters, width, height) {
 
 
 function fillCubeTexture(gl, texture) {
+    if (USE_AR_MARKERS)
+        return fillUintCubeTexture(gl, texture);
     gl.activeTexture(gl[`TEXTURE${texture.glId()}`]);
     gl.bindTexture(gl.TEXTURE_3D, texture);
     const stride = 2;
@@ -222,22 +243,50 @@ function fillCubeTexture(gl, texture) {
     );
 }
 
+function fillUintCubeTexture(gl, texture) {
+    gl.activeTexture(gl[`TEXTURE${texture.glId()}`]);
+    gl.bindTexture(gl.TEXTURE_3D, texture);
+    const stride = 4;
+    const size = CUBE_SIZE * CUBE_SIZE * CUBE_SIZE * stride;
+    const data = new Uint8Array(size);
+    for (let i = 0; i < size; i += stride) {
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+        data[i + 3] = 0;
+    }
+
+    gl.texSubImage3D(
+        gl.TEXTURE_3D,
+        0, // mip-map level
+        0, // x-offset
+        0, // y-offset
+        0, // z-offset
+        CUBE_SIZE,
+        CUBE_SIZE,
+        CUBE_SIZE,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        data,
+    );
+}
+
 // Create textures into which the camera output will be stored.
 function setupTextures(gl, programs, width, height) {
     let lastTextureId = 0;
-    function createTexture3D() {
+    function createTexture3D(format) {
         gl.activeTexture(gl[`TEXTURE${lastTextureId}`]);
         const texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_3D, texture);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texStorage3D(
             gl.TEXTURE_3D,
             1, // number of mip-map levels
-            gl.RG32F, // internal format
+            format, // internal format
             CUBE_SIZE,
             CUBE_SIZE,
             CUBE_SIZE,
@@ -273,11 +322,12 @@ function setupTextures(gl, programs, width, height) {
         return texture;
     }
 
-    const cube0 = createTexture3D();
-    const cube1 = createTexture3D();
+    const cube0 = createTexture3D(USE_AR_MARKERS ? gl.RGBA8 : gl.RG32F);
+    const cube1 = USE_AR_MARKERS ? null : createTexture3D();
     fillCubeTexture(gl, cube0);
     const depth0 = createTexture2D(gl.R32F, width, height);
     const depth1 = createTexture2D(gl.R32F, width, height);
+    const color = createTexture2D(gl.RGBA8, width, height);
     const matrices = createTexture2D(gl.RGBA32F, 5*width, 3*height);
     const crossProduct = createTexture2D(gl.RGBA32F, width, height);
     const normal = createTexture2D(gl.RGBA32F, width, height);
@@ -293,6 +343,7 @@ function setupTextures(gl, programs, width, height) {
         cube0,
         cube1,
         depth: [depth0, depth1],
+        color,
         sum,
         matrices,
         points: {

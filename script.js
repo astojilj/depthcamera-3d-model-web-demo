@@ -23,6 +23,8 @@ let yaw = 0;
 let pitch = 0;
 
 const USE_FAKE_DATA = false;
+const USE_AR_MARKERS = (typeof USE_AR_MARKERS_CONFIG != 'undefined')
+                       && USE_AR_MARKERS_CONFIG;
 
 // Use this for displaying errors to the user. More details should be put into
 // `console.error` messages.
@@ -65,10 +67,10 @@ function handleMouseMove(event) {
 
 function getViewMatrix() {
     const view = mat4.create();
-    mat4.translate(view, view, vec3.fromValues(0, 0, 1.8));
+    mat4.translate(view, view, vec3.fromValues(0, 0, 1.1));
     mat4.rotateY(view, view, glMatrix.toRadian(yaw));
     mat4.rotateX(view, view, glMatrix.toRadian(pitch));
-    mat4.translate(view, view, vec3.fromValues(0, 0, -1.8));
+    mat4.translate(view, view, vec3.fromValues(0, 0, -1.1));
     return view;
 }
 
@@ -142,14 +144,15 @@ async function doMain() {
                 initUniforms(gl, programs, textures, cameraParams, width, height);
                 framebuffers = initFramebuffers(gl, programs, textures);
             }
+            const iTex = frame % 2;
             try {
                 let source = depthStreamElement;
                 if (USE_FAKE_DATA) {
                     source = fakeData;
                     if (frame === 1) source = fakeData2;
                 }
-                gl.activeTexture(gl[`TEXTURE${textures.depth[frame%2].glId()}`]);
-                gl.bindTexture(gl.TEXTURE_2D, textures.depth[frame%2]);
+                gl.activeTexture(gl[`TEXTURE${textures.depth[iTex].glId()}`]);
+                gl.bindTexture(gl.TEXTURE_2D, textures.depth[iTex]);
                 gl.texSubImage2D(
                     gl.TEXTURE_2D,
                     0, // mip-map level
@@ -161,6 +164,19 @@ async function doMain() {
                     gl.FLOAT,
                     source,
                 );
+                gl.activeTexture(gl[`TEXTURE${textures.color.glId()}`]);
+                gl.bindTexture(gl.TEXTURE_2D, textures.color);
+                gl.texSubImage2D(
+                    gl.TEXTURE_2D,
+                    0, // mip-map level
+                    0, // x-offset
+                    0, // y-offset
+                    width,
+                    height,
+                    gl.RGBA,
+                    gl.UNSIGNED_BYTE,
+                    colorStreamElement,
+                );
             } catch (e) {
                 console.error(`Error uploading video to WebGL:
                     ${e.name}, ${e.message}`);
@@ -169,13 +185,14 @@ async function doMain() {
             let l;
             let program;
 
-            const movement = estimateMovement(
-                gl,
-                programs,
-                textures,
-                framebuffers,
-                frame,
-            );
+            const movement = USE_AR_MARKERS ? mat4.create() :
+                estimateMovement(
+                    gl,
+                    programs,
+                    textures,
+                    framebuffers,
+                    frame,
+                );
             mat4.mul(globalMovement, movement, globalMovement);
             // console.log(movement);
             console.log("");
@@ -185,19 +202,19 @@ async function doMain() {
             l = gl.getUniformLocation(program, 'movement');
             gl.uniformMatrix4fv(l, false, globalMovement);
             l = gl.getUniformLocation(program, 'depthTexture');
-            gl.uniform1i(l, textures.depth[frame%2].glId());
-            l = gl.getUniformLocation(program, 'cubeTexture');
-            if (frame % 2 === 0) {
-                gl.uniform1i(l, textures.cube0.glId());
-            } else {
-                gl.uniform1i(l, textures.cube1.glId());
+            gl.uniform1i(l, textures.depth[iTex].glId());
+            const iOutputTex = USE_AR_MARKERS ? iTex : ((frame + 1) % 2);
+            if (!USE_AR_MARKERS) {
+                l = gl.getUniformLocation(program, 'cubeTexture');
+                gl.uniform1i(l, iTex === 0 ? textures.cube0.glId()
+                                           : textures.cube1.glId());
             }
             l = gl.getUniformLocation(program, 'zslice');
             for (let zslice = 0; zslice < CUBE_SIZE; zslice += 1) {
                 gl.uniform1ui(l, zslice);
                 gl.bindFramebuffer(
                     gl.FRAMEBUFFER,
-                    framebuffers.model[(frame + 1) % 2][zslice],
+                    framebuffers.model[iOutputTex][zslice],
                 );
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
             }
@@ -205,11 +222,8 @@ async function doMain() {
             gl.useProgram(program);
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             l = gl.getUniformLocation(program, 'cubeTexture');
-            if (frame % 2 === 0) {
-                gl.uniform1i(l, textures.cube1.glId());
-            } else {
-                gl.uniform1i(l, textures.cube0.glId());
-            }
+            gl.uniform1i(l, (iTex === 0 && !USE_AR_MARKERS) ?
+                            textures.cube1.glId() : textures.cube0.glId());
             l = gl.getUniformLocation(program, 'viewMatrix');
             gl.uniformMatrix4fv(l, false, getViewMatrix());
             gl.clear(gl.COLOR_BUFFER_BIT);
