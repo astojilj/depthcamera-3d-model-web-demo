@@ -131,7 +131,6 @@ async function doMain() {
     let frame = 0;
     let textures;
     let framebuffers;
-    let globalMovement = mat4.create();
     // Run for each frame. Will do nothing if the camera is not ready yet.
     const animate = function () {
         if (depthStreamReady && colorStreamReady) {
@@ -141,6 +140,12 @@ async function doMain() {
                     height = depthStreamElement.videoHeight;
                 }
                 textures = setupTextures(gl, programs, width, height);
+                if (USE_AR_MARKERS) {
+                    initGLForARMarkerDetection(gl,
+                                               colorStreamElement.videoWidth,
+                                               colorStreamElement.videoHeight,
+                                               textures.lastTextureId);                    
+                }
                 initUniforms(gl, programs, textures, cameraParams, width, height);
                 framebuffers = initFramebuffers(gl, programs, textures);
             }
@@ -185,39 +190,33 @@ async function doMain() {
             let l;
             let program;
 
-            const movement = USE_AR_MARKERS ? mat4.create() :
-                estimateMovement(
-                    gl,
-                    programs,
-                    textures,
-                    framebuffers,
-                    frame,
-                );
-            mat4.mul(globalMovement, movement, globalMovement);
-            // console.log(movement);
-            console.log("");
-
-            program = programs.model;
-            gl.useProgram(program);
-            l = gl.getUniformLocation(program, 'movement');
-            gl.uniformMatrix4fv(l, false, globalMovement);
-            l = gl.getUniformLocation(program, 'depthTexture');
-            gl.uniform1i(l, textures.depth[iTex].glId());
-            const iOutputTex = USE_AR_MARKERS ? iTex : ((frame + 1) % 2);
-            if (!USE_AR_MARKERS) {
-                l = gl.getUniformLocation(program, 'cubeTexture');
-                gl.uniform1i(l, iTex === 0 ? textures.cube0.glId()
-                                           : textures.cube1.glId());
-            }
-            l = gl.getUniformLocation(program, 'zslice');
-            for (let zslice = 0; zslice < CUBE_SIZE; zslice += 1) {
-                gl.uniform1ui(l, zslice);
-                gl.bindFramebuffer(
-                    gl.FRAMEBUFFER,
-                    framebuffers.model[iOutputTex][zslice],
-                );
-                gl.drawArrays(gl.TRIANGLES, 0, 6);
-            }
+            const globalMovement = getCameraTransform(gl, programs, textures,
+                                                      framebuffers, frame);
+            gl.bindVertexArray(gl.vao_cube);
+            if (globalMovement) {
+                // If there was an error, don't write to cube.
+                program = programs.model;
+                gl.useProgram(program);
+                l = gl.getUniformLocation(program, 'movement');
+                gl.uniformMatrix4fv(l, false, globalMovement);
+                l = gl.getUniformLocation(program, 'depthTexture');
+                gl.uniform1i(l, textures.depth[iTex].glId());
+                const iOutputTex = USE_AR_MARKERS ? iTex : ((frame + 1) % 2);
+                if (!USE_AR_MARKERS) {
+                    l = gl.getUniformLocation(program, 'cubeTexture');
+                    gl.uniform1i(l, iTex === 0 ? textures.cube0.glId()
+                                               : textures.cube1.glId());
+                }
+                l = gl.getUniformLocation(program, 'zslice');
+                for (let zslice = 0; zslice < CUBE_SIZE; zslice += 1) {
+                    gl.uniform1ui(l, zslice);
+                    gl.bindFramebuffer(
+                        gl.FRAMEBUFFER,
+                        framebuffers.model[iOutputTex][zslice],
+                    );
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                }                
+            } 
             program = programs.render;
             gl.useProgram(program);
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);

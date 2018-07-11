@@ -96,6 +96,7 @@ function initAttributes(gl, programs) {
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
+    gl.vao_cube = vao;
     const bytesInFloat = 4; // gl.Float
     const posOffset = 0;
     const posItems = 3;
@@ -130,6 +131,7 @@ function initAttributes(gl, programs) {
     program = programs.render;
     gl.useProgram(program);
     uploadAttribute('inPosition', posOffset, posItems);
+    gl.bindVertexArray(null);
 }
 
 // Take the parameters returned from `DepthCamera.getCameraCalibration` and
@@ -195,7 +197,7 @@ function initUniforms(gl, programs, textures, parameters, width, height) {
     l = gl.getUniformLocation(program, 'depthOffset');
     gl.uniform2f(l, offsetx, offsety);
     l = gl.getUniformLocation(program, 'colorTexture');
-    gl.uniform1i(l, textures.color[0].glId());
+    gl.uniform1i(l, textures.color.glId());
     l = gl.getUniformLocation(program, 'colorFocalLength');
     gl.uniform2f(l, colorfocalx, colorfocaly);
     l = gl.getUniformLocation(program, 'colorOffset');
@@ -351,6 +353,7 @@ function setupTextures(gl, programs, width, height) {
             normal,
             dotAndError,
         },
+        lastTextureId
     };
 }
 
