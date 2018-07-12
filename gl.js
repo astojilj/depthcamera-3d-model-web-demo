@@ -329,7 +329,6 @@ function setupTextures(gl, programs, width, height) {
     fillCubeTexture(gl, cube0);
     const depth0 = createTexture2D(gl.R32F, width, height);
     const depth1 = createTexture2D(gl.R32F, width, height);
-    const color = createTexture2D(gl.RGBA8, width, height);
     const matrices = createTexture2D(gl.RGBA32F, 5*width, 3*height);
     const crossProduct = createTexture2D(gl.RGBA32F, width, height);
     const normal = createTexture2D(gl.RGBA32F, width, height);
@@ -340,6 +339,7 @@ function setupTextures(gl, programs, width, height) {
     for (let size = biggestSize; size > 0; size >>= 1) {
         sum.push(createTexture2D(gl.RGBA32F, 5*size, 3*size));
     }
+    const color = createTexture2D(gl.RGBA8, width, height);
 
     return {
         cube0,
@@ -353,7 +353,6 @@ function setupTextures(gl, programs, width, height) {
             normal,
             dotAndError,
         },
-        lastTextureId
     };
 }
 

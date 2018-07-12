@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-function initGLForARMarkerDetection(gl, width, height, texture_unit_base = 0) {
+function initGLForARMarkerDetection(gl, width, height, texture_unit_base = 0,
+                                    color_texture = undefined, ar_markers_file = null) {
   if (!gl.getExtension('EXT_color_buffer_float')) {
     console.error("EXT_color_buffer_float is required, abort.");
     return null;
@@ -789,7 +790,8 @@ function initGLForARMarkerDetection(gl, width, height, texture_unit_base = 0) {
     return framebuffer;
   }
 
-  const texture = createTexture(false);
+  const texture = (typeof color_texture == 'undefined') ?
+                  createTexture(false) : color_texture;
   const threshold_texture = createTexture();
   const corners_texture = createTexture();
   const corners_refine_texture = createTexture();
@@ -887,20 +889,20 @@ function initGLForARMarkerDetection(gl, width, height, texture_unit_base = 0) {
   gl.line_index_buffer = line_index_buffer;
   gl.video_texture = texture;
 
-  
+
   // Texture used for displaying detected codes 0..63
   const image = new Image();
   gl.codes_texture = gl.createTexture();
   image.onload = function() {
-/*    gl.activeTexture(gl.TEXTURE0);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, gl.codes_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);*/
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
   };
-  image.src = "64.png";
+  image.src = ar_markers_file ? ar_markers_file : "64.png";
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
   gl.timer_extension = gl.getExtension("EXT_disjoint_timer_query_webgl2") || gl.getExtension("EXT_disjoint_timer_query");
   if (gl.timer_extension)

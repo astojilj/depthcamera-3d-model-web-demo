@@ -141,10 +141,14 @@ async function doMain() {
                 }
                 textures = setupTextures(gl, programs, width, height);
                 if (USE_AR_MARKERS) {
+                    // internal ar_markers implementation
+                    textures.color.unit = textures.color.glId();
                     initGLForARMarkerDetection(gl,
                                                colorStreamElement.videoWidth,
                                                colorStreamElement.videoHeight,
-                                               textures.lastTextureId);                    
+                                               textures.color.glId() + 1,
+                                               textures.color,
+                                               "ar_markers/64.png");                    
                 }
                 initUniforms(gl, programs, textures, cameraParams, width, height);
                 framebuffers = initFramebuffers(gl, programs, textures);
