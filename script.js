@@ -143,17 +143,18 @@ async function doMain() {
                 if (USE_AR_MARKERS) {
                     // internal ar_markers implementation
                     textures.color.unit = textures.color.glId();
-                    initGLForARMarkerDetection(gl,
-                                               colorStreamElement.videoWidth,
-                                               colorStreamElement.videoHeight,
-                                               textures.color.glId() + 1,
-                                               textures.color,
-                                               "ar_markers/64.png");                    
+                    ARMarker.initGLForARMarkerDetection(
+                        gl,
+                        colorStreamElement.videoWidth,
+                        colorStreamElement.videoHeight,
+                        textures.color.glId() + 1,
+                        textures.color,
+                        "ar_markers/64.png");                    
                 }
                 initUniforms(gl, programs, textures, cameraParams, width, height);
                 framebuffers = initFramebuffers(gl, programs, textures);
             }
-            const iTex = frame % 2;
+            const iTex = USE_AR_MARKERS ? 0 : (frame % 2);
             try {
                 let source = depthStreamElement;
                 if (USE_FAKE_DATA) {

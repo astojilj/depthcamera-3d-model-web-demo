@@ -298,8 +298,7 @@
       const height = this.video.videoHeight;
       const canvas = this.shadowRoot.getElementById("canvasGL");
       const gl = canvas.getContext("webgl2",  {antialias: false});
-      
-      return initGLForARMarkerDetection(gl, width, height);
+      return ARMarker.initGLForARMarkerDetection(gl, width, height);
     }
 
     async loadStream() {

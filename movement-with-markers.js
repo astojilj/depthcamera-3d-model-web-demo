@@ -19,6 +19,7 @@ let readBuffer = null;
 const width = 640;
 const height = 480;
 let ctx2d = null;
+let initialized = false;
 
 _readPixels = (gl) => {
   readBuffer = new Uint8Array(width * height * 4);
@@ -91,57 +92,116 @@ _putReadFloatPixelsTo2DCanvas = (w, h) => {
 }
 
 function getCameraTransform(gl, programs, textures, framebuffers, frame) {
-    gl.bindVertexArray(gl.vao_markers);
-    for (let i = 0; i < gl.passes.length; ++i) {
-      const pass = gl.passes[i];
-      // comment previous two lines and uncomment following to measure
-      // latency of rendering only
-      // { const pass = gl.passes[6];
-      gl.useProgram(pass.program);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
+  gl.bindVertexArray(gl.vao_markers);
+  if (!initialized) {
+    // Remove original passes used for rendering detected markers as we won't
+    // need them and add another pass that would, using depth camera, calculate
+    // 3D position of AR marker square.
+    const initialize = () => {
+      const t = gl.passes[5].out[0];
+      // We use two consecutive RGBA32F pixels in texture to hold information
+      // about markers' 3D transform - double the width. 
+      const transformsTexture = ARMarker.createFloatTexture(gl, t.w, t.h);
+      const transformsVertex = `#version 300 es
+        precision highp float;
+        in vec2 v;
+        out vec2 t;
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, gl.vertex_buffer);
-      gl.vertexAttribPointer(pass.program.vertex_location, 2, gl.FLOAT, false, 0, 0);
+        void main(){
+          gl_Position = vec4(v.x * 2.0 - 1.0, v.y * 2.0 - 1.0, 0, 1);
+          t = v;
+        }`;
+      const transformsPixel = `#version 300 es
+        precision highp float;
+        uniform sampler2D s;
+        uniform sampler2D sDepth;
+        in vec2 t;
+        out vec4 fragColor;
 
-      if(pass.outlines) {
-        gl.lineWidth(3);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.line_index_buffer);
-        gl.drawElementsInstanced(gl.LINE_LOOP, 4, gl.UNSIGNED_SHORT, 0, pass.outlines);
-      } else if (pass.codes) {  // codes
-        gl.enable(gl.BLEND);
-        const bound = gl.getParameter(gl.TEXTURE_BINDING_2D);
-        gl.bindTexture(gl.TEXTURE_2D, gl.codes_texture);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.index_buffer);
-        gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, pass.codes);
-        gl.bindTexture(gl.TEXTURE_2D, bound);
-        gl.disable(gl.BLEND);
-      } else {
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.index_buffer);
-        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);              
-      }
+        void main() {
+          // Viewport is 640x480, we are writing to 32x16 texture and
+          // reading from 16*16.
+          vec2 ts = vec2(40.0, 30.0) * t;
+          // fract * 8 values are ~0.25 and ~0.75
+          bool even = fract(ts.x * 8.0) > 0.5;
+          vec4 ar = texture(s, ts);
+          if (even) {
+            if (ar.x == 0.0 && ar.y == 0.0) {
+              fragColor = ar;
+              return;
+            }
+            // get the depth to calculate transformation.
+            
+
+            fragColor = vec4(1.0);            
+          } else {
+            fragColor = ar;            
+          }
+        }`;
+      const p = ARMarker.createProgram(gl, transformsVertex, transformsPixel, t);
+      const transformCalculationPass = {
+        in: t,
+        out: [transformsTexture],
+        framebuffer: ARMarker.createFramebuffer2D(gl, [transformsTexture]),
+        program: p
+      };
+      gl.useProgram(p);
+      gl.uniform1i(gl.getUniformLocation(p, "sDepth"), textures.depth[0].glId());
+      gl.passes.splice(6, 3, transformCalculationPass);
+    };
+    initialize();
+    initialized = true;
+  }
+  
+  for (let i = 0; i < gl.passes.length; ++i) {
+    const pass = gl.passes[i];
+    // comment previous two lines and uncomment following to measure
+    // latency of rendering only
+    // { const pass = gl.passes[6];
+    gl.useProgram(pass.program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.vertex_buffer);
+    gl.vertexAttribPointer(pass.program.vertex_location, 2, gl.FLOAT, false, 0, 0);
+
+    if(pass.outlines) {
+      gl.lineWidth(3);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.line_index_buffer);
+      gl.drawElementsInstanced(gl.LINE_LOOP, 4, gl.UNSIGNED_SHORT, 0, pass.outlines);
+    } else if (pass.codes) {  // codes
+      gl.enable(gl.BLEND);
+      const bound = gl.getParameter(gl.TEXTURE_BINDING_2D);
+      gl.bindTexture(gl.TEXTURE_2D, gl.codes_texture);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.index_buffer);
+      gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, pass.codes);
+      gl.bindTexture(gl.TEXTURE_2D, bound);
+      gl.disable(gl.BLEND);
+    } else {
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.index_buffer);
+      gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);              
     }
+  }
 
-    // Read it back to buffer.
-    if (READ_FULL_PIXELS) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, gl.passes[2].framebuffer);
-      _readPixels(gl);
-      _putReadPixelsTo2DCanvas();
-    }
-    // readPixels = true;
-    if (READ_FLOAT_PIXELS) {
-      const pass = gl.passes[5];
-      gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
-      _readFloatPixels(gl, pass.out[0].w, pass.out[0].h);
-      // Put read and processed pixels to 2D canvas.
-      // Note: This is just one of scenarios for the demo. You can directly
-      // bind video to 2D canvas without using WebGL as intermediate step.
-      // _putReadPixelsTo2DCanvas();
-      _putReadFloatPixelsTo2DCanvas(pass.out[0].w, pass.out[0].h);
-    }
+  // Read it back to buffer.
+  if (READ_FULL_PIXELS) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, gl.passes[2].framebuffer);
+    _readPixels(gl);
+    _putReadPixelsTo2DCanvas();
+  }
+  // readPixels = true;
+  if (READ_FLOAT_PIXELS) {
+    const pass = gl.passes[6];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
+    _readFloatPixels(gl, pass.out[0].w, pass.out[0].h);
+    // Put read and processed pixels to 2D canvas.
+    // Note: This is just one of scenarios for the demo. You can directly
+    // bind video to 2D canvas without using WebGL as intermediate step.
+    // _putReadPixelsTo2DCanvas();
+    _putReadFloatPixelsTo2DCanvas(pass.out[0].w, pass.out[0].h);
+  }
 
-    gl.bindVertexArray(null);
-    return mat4.create();
-
+  gl.bindVertexArray(null);
+  return mat4.create();
 /*    program = programs.points;
     gl.useProgram(program);
     // Swap between depth textures, so that the older one is referenced as
