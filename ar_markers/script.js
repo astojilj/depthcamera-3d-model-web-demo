@@ -13,39 +13,6 @@
 // limitations under the License.
 
 let ARMarker = {
-  createProgram: (gl, vs, ps, texture) => {
-    // Shaders and program are needed only if rendering depth texture.
-    var vertex_shader = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vertex_shader, vs);
-    gl.compileShader(vertex_shader);
-
-    var pixel_shader = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(pixel_shader, ps);
-    gl.compileShader(pixel_shader);
-
-    var program  = gl.createProgram();
-    gl.attachShader(program, vertex_shader);
-    gl.attachShader(program, pixel_shader);
-    gl.linkProgram(program);
-    const vinfo = gl.getShaderInfoLog(vertex_shader);
-    const pinfo = gl.getShaderInfoLog(pixel_shader);
-    if (vinfo.length > 0)
-      console.error(vinfo);
-    if (pinfo.length > 0)
-      console.error(pinfo);
-
-    gl.useProgram(program);
-
-    const vertex_location = gl.getAttribLocation(program, "v");
-    gl.enableVertexAttribArray(vertex_location);
-    program.vertex_location = vertex_location;
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.vertex_buffer);
-    gl.vertexAttribPointer(vertex_location, 2, gl.FLOAT, false, 0, 0);
-
-    gl.uniform1i(gl.getUniformLocation(program, "s"), texture.unit);
-    gl.uniform2f(gl.getUniformLocation(program, "tex_dd"), 1.0 / width, 1.0 / height);
-    return program;
-  },
 
   createFramebuffer2D: (gl, textureList) => {
     const framebuffer = gl.createFramebuffer();
@@ -792,6 +759,42 @@ let ARMarker = {
       return texture; 
     }
 
+    this.createProgram = (gl, vs, ps, texture, setAttribs = true) => {
+      // Shaders and program are needed only if rendering depth texture.
+      var vertex_shader = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vertex_shader, vs);
+      gl.compileShader(vertex_shader);
+
+      var pixel_shader = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(pixel_shader, ps);
+      gl.compileShader(pixel_shader);
+
+      var program  = gl.createProgram();
+      gl.attachShader(program, vertex_shader);
+      gl.attachShader(program, pixel_shader);
+      gl.linkProgram(program);
+      const vinfo = gl.getShaderInfoLog(vertex_shader);
+      const pinfo = gl.getShaderInfoLog(pixel_shader);
+      if (vinfo.length > 0)
+        console.error(vinfo);
+      if (pinfo.length > 0)
+        console.error(pinfo);
+
+      if (!setAttribs)
+      	return program;
+
+      gl.useProgram(program);
+
+      const vertex_location = gl.getAttribLocation(program, "v");
+      gl.enableVertexAttribArray(vertex_location);
+      program.vertex_location = vertex_location;
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertex_buffer);
+      gl.vertexAttribPointer(vertex_location, 2, gl.FLOAT, false, 0, 0);
+
+      gl.uniform1i(gl.getUniformLocation(program, "s"), texture.unit);
+      gl.uniform2f(gl.getUniformLocation(program, "tex_dd"), 1.0 / width, 1.0 / height);
+      return program;
+    }
 
     const texture = (typeof color_texture == 'undefined') ?
                     createTexture(false) : color_texture;
