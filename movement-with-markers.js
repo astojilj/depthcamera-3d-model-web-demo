@@ -20,6 +20,10 @@ let readBuffer = null;
 const width = 640;
 const height = 480;
 let ctx2d = null;
+let focalLengthX;
+let focalLengthY;
+let offsetX;
+let offsetY;
 
 _readPixels = (gl) => {
   readBuffer = new Uint8Array(width * height * 4);
@@ -61,14 +65,37 @@ _putReadFloatPixelsTo2DCanvas = (w, h) => {
     ctx2d = document.getElementById('canvas2D').getContext('2d');
   if (!READ_FULL_PIXELS && !READ_MAPPED_FULL_PIXELS)
     ctx2d.clearRect(0, 0, width, height);
+  var matrix = mat3.create();
+  var q = quat.create();
+
   for (let j = 0; j < h; j++) {
     const row = j * w * 4;
     const rend = (j + 1) * w * 4;
-    for (let i = row; i < rend; i+=4) {
+    for (let i = row; i < rend; i+=8) {
       if (readBuffer[i] != 0.0 && readBuffer[i+1] != 0.0) {
         // Calculate the pixel.
-        let x = (((readBuffer[i] % 1.0) * width) | 0) + 3;
-        let y = (((readBuffer[i+1] % 1.0) * height) | 0) + 3;
+
+        let xf = readBuffer[i] / readBuffer[i + 2];
+        let yf = readBuffer[i+1] / readBuffer[i + 2];
+        let x1 = xf * focalLengthX + offsetX;
+        let y1 = yf * focalLengthY + offsetY;
+        ctx2d.beginPath();
+        ctx2d.fillStyle = "#FF0000";
+        ctx2d.fillRect(x1, y1, 4, 4);
+        ctx2d.stroke();
+        
+        q[0] = readBuffer[i + 4];
+        q[1] = readBuffer[i + 5];
+        q[2] = readBuffer[i + 6];
+        q[3] = readBuffer[i + 7];
+        mat3.fromQuat(matrix, q);
+        let b = readBuffer[i + 4] != matrix[0];
+
+/*
+        let xf = readBuffer[i] % 1.0;
+        let yf = readBuffer[i+1] % 1.0;
+        let x = ((xf * width) | 0) + 3;
+        let y = ((yf * height) | 0) + 3;
 
         const index = (readBuffer[i] | 0) >> 10;
         
@@ -100,6 +127,7 @@ _putReadFloatPixelsTo2DCanvas = (w, h) => {
           }
           ctx2d.stroke();
         }
+*/        
       }
     }
   }
@@ -209,9 +237,43 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
   const transformsPixel = `#version 300 es
     precision highp float;
     uniform sampler2D s;
-    uniform sampler2D sDepth;
+    uniform sampler2D sPos;
     in vec2 t;
     out vec4 fragColor;
+
+    vec4 matToQuat(vec3 m0, vec3 m1, vec3 m2) {
+      // Approach copied from
+      // http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
+      float tr = m0.x + m1.y + m2.z;
+      vec4 q;
+
+      if (tr > 0.0) { 
+        float S = sqrt(tr+1.0) * 2.0; // S=4*qw 
+        q.w = 0.25 * S;
+        q.x = (m2.y - m1.z) / S;
+        q.y = (m0.z - m2.x) / S; 
+        q.z = (m1.x - m0.y) / S; 
+      } else if ((m0.x > m1.y) && (m0.x > m2.z)) { 
+        float S = sqrt(1.0 + m0.x - m1.y - m2.z) * 2.0; // S=4*qx 
+        q.w = (m2.y - m1.z) / S;
+        q.x = 0.25 * S;
+        q.y = (m0.y + m1.x) / S; 
+        q.z = (m0.z + m2.x) / S; 
+      } else if (m1.y > m2.z) { 
+        float S = sqrt(1.0 + m1.y - m0.x - m2.z) * 2.0; // S=4*qy
+        q.w = (m0.z - m2.x) / S;
+        q.x = (m0.y + m1.x) / S; 
+        q.y = 0.25 * S;
+        q.z = (m1.z + m2.y) / S; 
+      } else { 
+        float S = sqrt(1.0 + m2.z - m0.x - m1.y) * 2.0; // S=4*qz
+        q.w = (m1.x - m0.y) / S;
+        q.x = (m0.z + m2.x) / S;
+        q.y = (m1.z + m2.y) / S;
+        q.z = 0.25 * S;
+      }
+      return q;
+    }
 
     void main() {
       // Viewport is 640x480, we are writing to 32x16 texture and
@@ -221,15 +283,44 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       float even = float(fract(ts.x * 8.0) > 0.5);
       ts.x = ts.x - even * 0.0625;
       vec4 ar = texture(s, ts);
+      if (ar.x == 0.0 && ar.y == 0.0) {
+        fragColor = vec4(0.0);
+        return;
+      }
+      vec4 t01 = fract(ar); // 1st and 2nd corner encoded in fracts.
+      // Unpack the position of all the corners and get 3D positions.
+      vec2 size = vec2(textureSize(sPos, 0)); // color texture size
+      vec2 t23 = trunc(ar.ba) / size;
+      vec3 p0 = texture(sPos, t01.rg).xyz;
+      vec3 p1 = texture(sPos, t01.ba).xyz;
+      vec3 p3 = texture(sPos, t23).xyz;
+      // TODO: for p0, p1, p3, sample around and get average, even if zero.
+      if (p0.z * p1.z * p3.z == 0.0) {
+        // For start, ignore if any is zero.
+        fragColor = vec4(0.0);
+        return;
+      }
+      // now we have three points.
+      // TODO: verify the distance.
+
+
+      vec3 x = normalize(p3 - p0);
+      vec3 y = normalize(p1 - p0);
+      vec3 z = cross(x, y);
+      float dotcheck = abs(dot(x, y)); 
+      if (dotcheck > 0.1) {
+        // Should be orthogonal.
+        fragColor = vec4(0.0);
+        return;
+      }
+      // y = cross(z, x); // fix if not orthogonal.
+
       if (even == 1.0) {
-        if (ar.x == 0.0 && ar.y == 0.0) {
-          fragColor = ar;
-          return;
-        }
-        // get the depth to calculate transformation.
-        fragColor = vec4(ts, ts);            
+        // get the rotation.
+
+        fragColor = matToQuat(x, y, z);
       } else {
-        fragColor = ar;            
+        fragColor = vec4(p0, trunc(ar.r/1024.0));            
       }
     }`;
   const p = ARMarker.createProgram(gl, transformsVertex, transformsPixel, t);
@@ -240,8 +331,13 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
     program: p
   };
   gl.useProgram(p);
-  gl.uniform1i(gl.getUniformLocation(p, "sDepth"), textures.depth[0].glId());
+  gl.uniform1i(gl.getUniformLocation(p, "sPos"), d2cTexture.unit);
   gl.passes.splice(6, 3, d2cPass, transformCalculationPass);
+
+  offsetX = cameraParams.colorOffset[0];
+  offsetY = cameraParams.colorOffset[1];
+  focalLengthX = cameraParams.colorFocalLength[0];
+  focalLengthY = cameraParams.colorFocalLength[1];
 }
 
 function getCameraTransform(gl, programs, textures, framebuffers, frame) {
