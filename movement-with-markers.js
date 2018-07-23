@@ -24,6 +24,10 @@ let focalLengthX;
 let focalLengthY;
 let offsetX;
 let offsetY;
+let initialTransform = null;
+const transform = mat4.create();
+const q = quat.create();
+const v = vec3.create();
 
 _readPixels = (gl) => {
   readBuffer = new Uint8Array(width * height * 4);
@@ -66,30 +70,23 @@ _putReadFloatPixelsTo2DCanvas = (w, h) => {
   if (!READ_FULL_PIXELS && !READ_MAPPED_FULL_PIXELS)
     ctx2d.clearRect(0, 0, width, height);
   var matrix = mat3.create();
-  var q = quat.create();
 
   for (let j = 0; j < h; j++) {
     const row = j * w * 4;
     const rend = (j + 1) * w * 4;
-    for (let i = row; i < rend; i+=8) {
+    for (let i = row; i < rend; i+=12) {
       if (readBuffer[i] != 0.0 && readBuffer[i+1] != 0.0) {
         // Calculate the pixel.
-
-        let xf = readBuffer[i] / readBuffer[i + 2];
-        let yf = readBuffer[i+1] / readBuffer[i + 2];
+        let z = readBuffer[i + 2] % 8;
+        let xf = readBuffer[i] / z;
+        let yf = readBuffer[i + 1] / z;
         let x1 = xf * focalLengthX + offsetX;
         let y1 = yf * focalLengthY + offsetY;
         ctx2d.beginPath();
         ctx2d.fillStyle = "#FF0000";
         ctx2d.fillRect(x1, y1, 4, 4);
         ctx2d.stroke();
-        
-        q[0] = readBuffer[i + 4];
-        q[1] = readBuffer[i + 5];
-        q[2] = readBuffer[i + 6];
-        q[3] = readBuffer[i + 7];
-        mat3.fromQuat(matrix, q);
-        let b = readBuffer[i + 4] != matrix[0];
+
 
 /*
         let xf = readBuffer[i] % 1.0;
@@ -221,10 +218,10 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
   gl.uniformMatrix4fv(gl.getUniformLocation(d2c, "depthToColor"), false, cameraParams.depthToColor);
 
   gl.bindVertexArray(gl.vao_markers);
-  // We use two consecutive RGBA32F pixels in texture to hold information
-  // about markers' 3D transform - double the width. 
+  // We use three consecutive RGBA32F pixels in texture to hold information
+  // about markers' 3D transform. 
   const t = gl.passes[5].out[0];
-  const transformsTexture = ARMarker.createFloatTexture(gl, t.w, t.h);
+  const transformsTexture = ARMarker.createFloatTexture(gl, t.w * 3, t.h);
   const transformsVertex = `#version 300 es
     precision highp float;
     in vec2 v;
@@ -241,47 +238,13 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
     in vec2 t;
     out vec4 fragColor;
 
-    vec4 matToQuat(vec3 m0, vec3 m1, vec3 m2) {
-      // Approach copied from
-      // http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
-      float tr = m0.x + m1.y + m2.z;
-      vec4 q;
-
-      if (tr > 0.0) { 
-        float S = sqrt(tr+1.0) * 2.0; // S=4*qw 
-        q.w = 0.25 * S;
-        q.x = (m2.y - m1.z) / S;
-        q.y = (m0.z - m2.x) / S; 
-        q.z = (m1.x - m0.y) / S; 
-      } else if ((m0.x > m1.y) && (m0.x > m2.z)) { 
-        float S = sqrt(1.0 + m0.x - m1.y - m2.z) * 2.0; // S=4*qx 
-        q.w = (m2.y - m1.z) / S;
-        q.x = 0.25 * S;
-        q.y = (m0.y + m1.x) / S; 
-        q.z = (m0.z + m2.x) / S; 
-      } else if (m1.y > m2.z) { 
-        float S = sqrt(1.0 + m1.y - m0.x - m2.z) * 2.0; // S=4*qy
-        q.w = (m0.z - m2.x) / S;
-        q.x = (m0.y + m1.x) / S; 
-        q.y = 0.25 * S;
-        q.z = (m1.z + m2.y) / S; 
-      } else { 
-        float S = sqrt(1.0 + m2.z - m0.x - m1.y) * 2.0; // S=4*qz
-        q.w = (m1.x - m0.y) / S;
-        q.x = (m0.z + m2.x) / S;
-        q.y = (m1.z + m2.y) / S;
-        q.z = 0.25 * S;
-      }
-      return q;
-    }
-
     void main() {
-      // Viewport is 640x480, we are writing to 32x16 texture and
+      // Viewport is 640x480, we are writing to 48x16 texture and
       // reading from 16*16.
-      vec2 ts = vec2(40.0, 30.0) * t;
-      // fract * 8 values are ~0.25 and ~0.75
-      float even = float(fract(ts.x * 8.0) > 0.5);
-      ts.x = ts.x - even * 0.0625;
+      vec2 ts = vec2(13.3333333333, 30.0) * t;
+      float tripplet = mod(ts.x, 0.0625);
+      ts.x = ts.x + 0.03125 - tripplet; // to sample at cell center
+
       vec4 ar = texture(s, ts);
       if (ar.x == 0.0 && ar.y == 0.0) {
         fragColor = vec4(0.0);
@@ -303,7 +266,6 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       // now we have three points.
       // TODO: verify the distance.
 
-
       vec3 x = normalize(p3 - p0);
       vec3 y = normalize(p1 - p0);
       vec3 z = cross(x, y);
@@ -315,12 +277,14 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       }
       // y = cross(z, x); // fix if not orthogonal.
 
-      if (even == 1.0) {
-        // get the rotation.
-
-        fragColor = matToQuat(x, y, z);
+      if (tripplet < 0.0208) {
+        // z is always positive. less than 8m. Use it to encode the code.
+        p0.z += (trunc(ar.r/1024.0) * 8.0);
+        fragColor = vec4(p0, x.x);            
+      } else if (tripplet < 0.0416) {
+        fragColor = vec4(x.yz, y.xy);
       } else {
-        fragColor = vec4(p0, trunc(ar.r/1024.0));            
+        fragColor = vec4(y.z, z);
       }
     }`;
   const p = ARMarker.createProgram(gl, transformsVertex, transformsPixel, t);
@@ -390,19 +354,76 @@ function getCameraTransform(gl, programs, textures, framebuffers, frame) {
     _putReadFullFloatPixelsTo2DCanvas();
   }
   // readPixels = true;
+  const pass = gl.passes[7];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
+  _readFloatPixels(gl, pass.out[0].w, pass.out[0].h);
+
   if (READ_FLOAT_PIXELS) {
-    const pass = gl.passes[7];
-    gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer);
-    _readFloatPixels(gl, pass.out[0].w, pass.out[0].h);
     // Put read and processed pixels to 2D canvas.
     // Note: This is just one of scenarios for the demo. You can directly
     // bind video to 2D canvas without using WebGL as intermediate step.
     // _putReadPixelsTo2DCanvas();
     _putReadFloatPixelsTo2DCanvas(pass.out[0].w, pass.out[0].h);
   }
-
   gl.bindVertexArray(null);
-  return mat4.create();
+
+  // Calculate the transform. The first measured transformation we take as
+  // the initial and then calculate transform from it.
+  for (let i = 0; i < readBuffer.length; i+=12) {
+    if (readBuffer[i] != 0.0 && readBuffer[i+1] != 0.0) {
+      // For start, using marker 1.
+      if (((readBuffer[i + 2] / 8) | 0) != 1)
+        continue;
+
+      q[0] = readBuffer[i + 4];
+      q[1] = readBuffer[i + 5];
+      q[2] = readBuffer[i + 6];
+      q[3] = readBuffer[i + 7];
+      v[0] = readBuffer[i];
+      v[1] = readBuffer[i + 1];
+      v[2] = readBuffer[i + 2];      
+
+      if (!initialTransform) {
+        initialTransform = mat4.create();
+        initialTransform[0] = readBuffer[i + 3];
+        initialTransform[1] = readBuffer[i + 4];
+        initialTransform[2] = readBuffer[i + 5];
+        initialTransform[4] = readBuffer[i + 6];
+        initialTransform[5] = readBuffer[i + 7];
+        initialTransform[6] = readBuffer[i + 8];
+        initialTransform[8] = readBuffer[i + 9];
+        initialTransform[9] = readBuffer[i + 10];
+        initialTransform[10] = readBuffer[i + 11];
+        initialTransform[12] = readBuffer[i];
+        initialTransform[13] = readBuffer[i + 1];
+        initialTransform[14] = readBuffer[i + 2] % 8;
+        return mat4.create();  
+      }
+      // calculate transformation from initialTransform -> current transform
+      transform[0] = readBuffer[i + 3];
+      transform[1] = readBuffer[i + 4];
+      transform[2] = readBuffer[i + 5];
+      transform[4] = readBuffer[i + 6];
+      transform[5] = readBuffer[i + 7];
+      transform[6] = readBuffer[i + 8];
+      transform[8] = readBuffer[i + 9];
+      transform[9] = readBuffer[i + 10];
+      transform[10] = readBuffer[i + 11];
+      transform[12] = readBuffer[i];
+      transform[13] = readBuffer[i + 1];
+      transform[14] = readBuffer[i + 2] % 8;
+      transform[3] = 0;
+      transform[7] = 0;
+      transform[11] = 0;
+      transform[15] = 1;
+
+      mat4.invert(transform, transform);
+      mat4.mul(transform, transform, initialTransform);
+      return transform;
+    }
+  }
+
+  return null;
 /*    program = programs.points;
     gl.useProgram(program);
     // Swap between depth textures, so that the older one is referenced as
