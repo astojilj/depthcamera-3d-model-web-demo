@@ -235,8 +235,38 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
     precision highp float;
     uniform sampler2D s;
     uniform sampler2D sPos;
+    uniform vec2 dd;
     in vec2 t;
     out vec4 fragColor;
+
+    vec3 getColorPixelPosition(vec2 uv) {
+      vec3 pos0 = texture(sPos, uv).xyz;
+      // Y sign doesn't matter as the sampling is simetric.
+      vec3 postl = texture(sPos, uv - vec2(dd.x, dd.y)).xyz;
+      vec3 posbr = texture(sPos, uv + vec2(dd.x, dd.y)).xyz;
+      vec3 postr = texture(sPos, uv - vec2(-dd.x, dd.y)).xyz;
+      vec3 posbl = texture(sPos, uv + vec2(-dd.x, dd.y)).xyz;
+      vec3 post = texture(sPos, uv - vec2(0.0, dd.y)).xyz;
+      vec3 posb = texture(sPos, uv + vec2(0.0, dd.y)).xyz;
+      vec3 posl = texture(sPos, uv - vec2(dd.x, 0.0)).xyz;
+      vec3 posr = texture(sPos, uv + vec2(dd.x, 0.0)).xyz;
+      vec3 pos1 = sign(postl.z * posbr.z) * mix(postl.z, posbr.z, 0.5);
+
+      vec4 nonzero = sign(vec4(pos0.z, pos1.z, pos2.z, pos3.z));
+      float count = dot(nonzero, nonzero);
+      if (pos0.z == 0.0 || count < 3.0) // Let's continue with at least two samples.
+        return vec3(0.0);
+      vec3 d1 = pos1 - pos0;
+      vec3 d2 = pos2 - pos0;
+      vec3 d3 = pos3 - pos0;
+      float dist1 = dot(d1, d1) * nonzero.y;
+      float dist2 = dot(d2, d2) * nonzero.z;
+      float dist3 = dot(d3, d3) * nonzero.w;
+      if (dist1 > 0.00003 || dist2 > 0.00003 || dist3 > 0.00003)
+        return vec3(0.0);
+      // Mix only non zero values
+      return (pos0 + pos1 * nonzero.y + pos2 * nonzero.z + pos3 * nonzero.w) / count;
+    }
 
     void main() {
       // Viewport is 640x480, we are writing to 48x16 texture and
@@ -253,10 +283,12 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       vec4 t01 = fract(ar); // 1st and 2nd corner encoded in fracts.
       // Unpack the position of all the corners and get 3D positions.
       vec2 size = vec2(textureSize(sPos, 0)); // color texture size
-      vec2 t23 = trunc(ar.ba) / size;
-      vec3 p0 = texture(sPos, t01.rg).xyz;
-      vec3 p1 = texture(sPos, t01.ba).xyz;
-      vec3 p3 = texture(sPos, t23).xyz;
+      float code = trunc(ar.r/1024.0);
+      vec4 t23 = trunc(ar - vec4(1024.0 * code, 0.0, 0.0, 0.0)) / vec4(size, size);
+      vec3 p0 = getColorPixelPosition(t01.rg);
+      vec3 p1 = getColorPixelPosition(t01.ba);
+      vec3 p3 = getColorPixelPosition(t23.ba);
+      vec3 p2 = getColorPixelPosition(t23.rg);
       // TODO: for p0, p1, p3, sample around and get average, even if zero.
       if (p0.z * p1.z * p3.z == 0.0) {
         // For start, ignore if any is zero.
@@ -266,20 +298,23 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       // now we have three points.
       // TODO: verify the distance.
 
-      vec3 x = normalize(p3 - p0);
-      vec3 y = normalize(p1 - p0);
+      vec3 x = p3 - p0;
+      vec3 y = p1 - p0;
       vec3 z = cross(x, y);
-      float dotcheck = abs(dot(x, y)); 
-      if (dotcheck > 0.1) {
+      float dotcheck = abs(dot(normalize(x),normalize(y))); 
+      if (dotcheck > 0.06) {
         // Should be orthogonal.
         fragColor = vec4(0.0);
         return;
       }
       // y = cross(z, x); // fix if not orthogonal.
 
+      z = p2;
+      x = p1;
+      y = p3;
       if (tripplet < 0.0208) {
         // z is always positive. less than 8m. Use it to encode the code.
-        p0.z += (trunc(ar.r/1024.0) * 8.0);
+        p0.z += (code * 8.0);
         fragColor = vec4(p0, x.x);            
       } else if (tripplet < 0.0416) {
         fragColor = vec4(x.yz, y.xy);
@@ -296,6 +331,8 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
   };
   gl.useProgram(p);
   gl.uniform1i(gl.getUniformLocation(p, "sPos"), d2cTexture.unit);
+  gl.uniform2f(gl.getUniformLocation(d2c, 'dd'), 1 / color.w, 1 / color.h);
+
   gl.passes.splice(6, 3, d2cPass, transformCalculationPass);
 
   offsetX = cameraParams.colorOffset[0];

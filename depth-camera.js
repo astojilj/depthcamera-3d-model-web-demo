@@ -60,7 +60,7 @@ DepthCamera.getDepthStream = async function () {
             audio: false,
             video: {
                 deviceId: {exact: track.getSettings().deviceId},
-                frameRate: {ideal: 60}
+                frameRate: {ideal: 30}
             }
         }
         stream = await navigator.mediaDevices.getUserMedia(constraints);
