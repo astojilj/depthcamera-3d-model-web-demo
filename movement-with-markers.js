@@ -28,6 +28,15 @@ let initialTransform = null;
 const transform = mat4.create();
 const q = quat.create();
 const v = vec3.create();
+const xvec = vec3.create();
+const yvec = vec3.create();
+const dvec = vec3.create();
+const x1vec = vec3.create();
+const y1vec = vec3.create();
+
+const xnorm = vec3.create();
+const ynorm = vec3.create();
+const znorm = vec3.create();
 
 _readPixels = (gl) => {
   readBuffer = new Uint8Array(width * height * 4);
@@ -239,8 +248,14 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
     in vec2 t;
     out vec4 fragColor;
 
+    float squareDistance(vec3 a, vec3 b) {
+      vec3 d = a - b;
+      return dot(d, d);
+    }
+
     vec3 getColorPixelPosition(vec2 uv) {
-      vec3 pos0 = texture(sPos, uv).xyz;
+      vec3 pos = texture(sPos, uv).xyz;
+      float posnonzero = sign(pos.z);
       // Y sign doesn't matter as the sampling is simetric.
       vec3 postl = texture(sPos, uv - vec2(dd.x, dd.y)).xyz;
       vec3 posbr = texture(sPos, uv + vec2(dd.x, dd.y)).xyz;
@@ -250,22 +265,43 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       vec3 posb = texture(sPos, uv + vec2(0.0, dd.y)).xyz;
       vec3 posl = texture(sPos, uv - vec2(dd.x, 0.0)).xyz;
       vec3 posr = texture(sPos, uv + vec2(dd.x, 0.0)).xyz;
-      vec3 pos1 = sign(postl.z * posbr.z) * mix(postl.z, posbr.z, 0.5);
+      
+      vec3 pos0 = sign(postl.z * posbr.z) * mix(postl, posbr, 0.5);
+      vec3 pos1 = sign(postr.z * posbl.z) * mix(postr, posbl, 0.5);
+      vec3 pos2 = sign(post.z * posb.z) * mix(post, posb, 0.5);
+      vec3 pos3 = sign(posl.z * posr.z) * mix(posl, posr, 0.5);
 
       vec4 nonzero = sign(vec4(pos0.z, pos1.z, pos2.z, pos3.z));
-      float count = dot(nonzero, nonzero);
-      if (pos0.z == 0.0 || count < 3.0) // Let's continue with at least two samples.
+      float count = dot(nonzero, nonzero) + posnonzero;
+      if (count < 2.0) // Let's continue with at least two samples.
         return vec3(0.0);
-      vec3 d1 = pos1 - pos0;
-      vec3 d2 = pos2 - pos0;
-      vec3 d3 = pos3 - pos0;
-      float dist1 = dot(d1, d1) * nonzero.y;
-      float dist2 = dot(d2, d2) * nonzero.z;
-      float dist3 = dot(d3, d3) * nonzero.w;
-      if (dist1 > 0.00003 || dist2 > 0.00003 || dist3 > 0.00003)
+
+      // Often, there is noise. Sample all points and calculate all distances
+      // between non zero points. If the points are nearby, it makes sense to
+      // calculate average point. Otherwise, skip the point and wait for the
+      // frame with no noise.
+      float d0 = squareDistance(pos, pos0);
+      float d1 = squareDistance(pos, pos1);
+      float d2 = squareDistance(pos, pos2);
+      float d3 = squareDistance(pos, pos3);
+      float d4 = squareDistance(pos0, pos1);
+      float d5 = squareDistance(pos0, pos2);
+      float d6 = squareDistance(pos0, pos3);
+      float d7 = squareDistance(pos1, pos2);
+      float d8 = squareDistance(pos1, pos3);
+      float d9 = squareDistance(pos2, pos3);
+      
+      vec4 w1 = vec4(d0, d1, d2, d3) * vec4(posnonzero) * nonzero;
+      vec4 w2 = vec4(d4, d5, d6, d7) * nonzero.xxxy * nonzero.yzwz;
+      vec2 w3 = vec2(d8, d9) * nonzero.yz * nonzero.ww;
+
+      vec4 error = vec4(0.00002);
+      if (any(greaterThan(w1, error)) || any(greaterThan(w2, error)) || any(greaterThan(w3, error.rg)))
         return vec3(0.0);
-      // Mix only non zero values
-      return (pos0 + pos1 * nonzero.y + pos2 * nonzero.z + pos3 * nonzero.w) / count;
+
+      // As the data is not to noisy, mix all non zero values.
+      return (pos * posnonzero + pos0 * nonzero.x + pos1 * nonzero.y
+              + pos2 * nonzero.z + pos3 * nonzero.w) / count;
     }
 
     void main() {
@@ -290,7 +326,7 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       vec3 p3 = getColorPixelPosition(t23.ba);
       vec3 p2 = getColorPixelPosition(t23.rg);
       // TODO: for p0, p1, p3, sample around and get average, even if zero.
-      if (p0.z * p1.z * p3.z == 0.0) {
+      if (p0.z * p1.z * p3.z * p2.z == 0.0) {
         // For start, ignore if any is zero.
         fragColor = vec4(0.0);
         return;
@@ -298,28 +334,20 @@ function initializeMovementCalculus(gl, programs, textures, framebuffers, camera
       // now we have three points.
       // TODO: verify the distance.
 
-      vec3 x = p3 - p0;
-      vec3 y = p1 - p0;
-      vec3 z = cross(x, y);
-      float dotcheck = abs(dot(normalize(x),normalize(y))); 
-      if (dotcheck > 0.06) {
+      float dotcheck = abs(dot(normalize(p3 - p0),normalize(p1 - p0))); 
+      if (dotcheck > 0.04) {
         // Should be orthogonal.
         fragColor = vec4(0.0);
         return;
       }
-      // y = cross(z, x); // fix if not orthogonal.
-
-      z = p2;
-      x = p1;
-      y = p3;
       if (tripplet < 0.0208) {
         // z is always positive. less than 8m. Use it to encode the code.
         p0.z += (code * 8.0);
-        fragColor = vec4(p0, x.x);            
+        fragColor = vec4(p0, p1.x);            
       } else if (tripplet < 0.0416) {
-        fragColor = vec4(x.yz, y.xy);
+        fragColor = vec4(p1.yz, p2.xy);
       } else {
-        fragColor = vec4(y.z, z);
+        fragColor = vec4(p2.z, p3);
       }
     }`;
   const p = ARMarker.createProgram(gl, transformsVertex, transformsPixel, t);
@@ -406,58 +434,100 @@ function getCameraTransform(gl, programs, textures, framebuffers, frame) {
 
   // Calculate the transform. The first measured transformation we take as
   // the initial and then calculate transform from it.
+  let i0 = null;
+  let i1 = null;
+  let i2 = null;
+
   for (let i = 0; i < readBuffer.length; i+=12) {
+
     if (readBuffer[i] != 0.0 && readBuffer[i+1] != 0.0) {
       // For start, using marker 1.
-      if (((readBuffer[i + 2] / 8) | 0) != 1)
-        continue;
-
-      q[0] = readBuffer[i + 4];
-      q[1] = readBuffer[i + 5];
-      q[2] = readBuffer[i + 6];
-      q[3] = readBuffer[i + 7];
-      v[0] = readBuffer[i];
-      v[1] = readBuffer[i + 1];
-      v[2] = readBuffer[i + 2];      
-
-      if (!initialTransform) {
-        initialTransform = mat4.create();
-        initialTransform[0] = readBuffer[i + 3];
-        initialTransform[1] = readBuffer[i + 4];
-        initialTransform[2] = readBuffer[i + 5];
-        initialTransform[4] = readBuffer[i + 6];
-        initialTransform[5] = readBuffer[i + 7];
-        initialTransform[6] = readBuffer[i + 8];
-        initialTransform[8] = readBuffer[i + 9];
-        initialTransform[9] = readBuffer[i + 10];
-        initialTransform[10] = readBuffer[i + 11];
-        initialTransform[12] = readBuffer[i];
-        initialTransform[13] = readBuffer[i + 1];
-        initialTransform[14] = readBuffer[i + 2] % 8;
-        return mat4.create();  
-      }
-      // calculate transformation from initialTransform -> current transform
-      transform[0] = readBuffer[i + 3];
-      transform[1] = readBuffer[i + 4];
-      transform[2] = readBuffer[i + 5];
-      transform[4] = readBuffer[i + 6];
-      transform[5] = readBuffer[i + 7];
-      transform[6] = readBuffer[i + 8];
-      transform[8] = readBuffer[i + 9];
-      transform[9] = readBuffer[i + 10];
-      transform[10] = readBuffer[i + 11];
-      transform[12] = readBuffer[i];
-      transform[13] = readBuffer[i + 1];
-      transform[14] = readBuffer[i + 2] % 8;
-      transform[3] = 0;
-      transform[7] = 0;
-      transform[11] = 0;
-      transform[15] = 1;
-
-      mat4.invert(transform, transform);
-      mat4.mul(transform, transform, initialTransform);
-      return transform;
+      const code = ((readBuffer[i + 2] / 8) | 0);
+      if (code == 0)
+        i0 = i;
+      else if (code == 1)
+        i1 = i;
+      else if (code == 2)
+        i2 = i;
+//      if (code == 1)
+//        break;
     }
+  }
+
+  if (i0 && i1 && i2)
+    console.log("all markers found");
+
+  if (i1) {
+    const i = i1;
+    const z0 = readBuffer[i + 2] % 8;
+
+    // Get x and y vectors.
+    xvec[0] = readBuffer[i + 9] - readBuffer[i];
+    xvec[1] = readBuffer[i + 10] - readBuffer[i + 1];
+    xvec[2] = readBuffer[i + 11] - z0;
+    yvec[0] = readBuffer[i + 3] - readBuffer[i];
+    yvec[1] = readBuffer[i + 4] - readBuffer[i + 1];
+    yvec[2] = readBuffer[i + 5] - z0;
+    
+    const xlength = vec3.length(xvec);
+    const ylength = vec3.length(yvec);
+
+    v[0] = readBuffer[i + 3];
+    v[1] = readBuffer[i + 4];
+    v[2] = readBuffer[i + 5];
+    vec3.add(v, v, xvec); // TODO: verify vs point 2.
+
+    vec3.scale(xnorm, xvec, 1 / xlength);
+    vec3.scale(ynorm, yvec, 1 / ylength);
+    vec3.cross(znorm, xnorm, ynorm);
+
+    x1vec[0] = readBuffer[i + 6] - readBuffer[i + 3];
+    x1vec[1] = readBuffer[i + 7] - readBuffer[i + 4];
+    x1vec[2] = readBuffer[i + 8] - readBuffer[i + 5];
+    y1vec[0] = readBuffer[i + 6] - readBuffer[i + 9];
+    y1vec[1] = readBuffer[i + 7] - readBuffer[i + 10];
+    y1vec[2] = readBuffer[i + 8] - readBuffer[i + 11];
+     
+    const x1length = vec3.length(x1vec);
+    const y1length = vec3.length(y1vec);
+
+    if (!initialTransform) {
+      initialTransform = mat4.create();
+      initialTransform[0] = xnorm[0];
+      initialTransform[1] = xnorm[1];
+      initialTransform[2] = xnorm[2];
+      initialTransform[4] = ynorm[0];
+      initialTransform[5] = ynorm[1];
+      initialTransform[6] = ynorm[2];
+      initialTransform[8] = znorm[0];
+      initialTransform[9] = znorm[1]
+      initialTransform[10] = znorm[2];
+      initialTransform[12] = readBuffer[i];
+      initialTransform[13] = readBuffer[i + 1];
+      initialTransform[14] = z0;
+      return mat4.create();  
+    }
+    // calculate transformation from initialTransform -> current transform
+    transform[0] = xnorm[0];
+    transform[1] = xnorm[1];
+    transform[2] = xnorm[2];
+    transform[4] = ynorm[0];
+    transform[5] = ynorm[1];
+    transform[6] = ynorm[2];
+    transform[8] = znorm[0];
+    transform[9] = znorm[1]
+    transform[10] = znorm[2];
+    transform[12] = readBuffer[i];
+    transform[13] = readBuffer[i + 1];
+    transform[14] = z0;
+    transform[3] = 0;
+    transform[7] = 0;
+    transform[11] = 0;
+    transform[15] = 1;
+
+    mat4.invert(transform, transform);
+    mat4.mul(transform, transform, initialTransform);
+    return transform;    
   }
 
   return null;
